@@ -1,10 +1,8 @@
 #include "arduino_secrets.h"
 // RingBufCPP - Version: 1.1.0
-#include <RingBufCPP.h>
-
 #include <stdint.h>
 #include "thingProperties.h"
-#include "pump.hpp"
+#include "Planter.hpp"
 
 /* IoT Cloud Properties
   String planterStatus;
@@ -12,17 +10,12 @@
   bool pumpSwitch;
 */
 
-// Time constants
-#define ONE_HOUR_MS 3600000               // 1 hour = 3,600,000 miliseconds
-#define HOUR_LOG_SIZE 24
-#define DAY_LOG_SIZE 8
-
-// Device constants
+// Hardware constants
 #define PUMP_CONTROLLER_PIN 1
 #define LED_PIN 2
 #define SENSOR_PIN A1
-#define MOISTURE_LOW_VOLT 520 // Voltage when sensor is dry
-#define MOISTURE_HI_VOLT 1023 // ... when sensor is saturated
+#define MOISTURE_LOW_VOLT 480 // Voltage when sensor is saturated
+#define MOISTURE_HI_VOLT 1023 // ... when sensor is dry
 
 // ********** CUSTOMIZATION VALUES *********
 #define INITIAL_MOISTURE_TRIGGER 50       // Set initial trigger v. high
@@ -30,36 +23,32 @@
 #define PUMP_PULSE_TIME_MS 1500           // Pulse for 1.5 sec
 #define SENSOR_CYCLE_TIME_MS 1000         // Check sensors every second
 #define POST_TRIGGER_PAUSE_SEC 3000       // Pause 5 min after last pump stop 
-                                          // before auto trigger (let moisture settle)
+// before auto trigger (let moisture settle)
 
 // Global variables ;
-unsigned long timerDelay = SENSOR_CYCLE_TIME_MS ; 
-unsigned long timerCounter = 0 ; 
-Pump pump(PUMP_CONTROLLER_PIN, LED_PIN, PUMP_RESERVOIR_CAPACITY_MS, PUMP_PULSE_TIME_MS) ;
-
-// ***************
-struct moisture_reading {
-  unsigned long tstamp ;
-  int moisturePercent ;
+unsigned long timerDelay = SENSOR_CYCLE_TIME_MS ;
+unsigned long timerCounter = 0 ;
+struct Planter::pinConfig pins = {
+  PUMP_CONTROLLER_PIN ,
+  LED_PIN ,
+  SENSOR_PIN
 } ;
-RingBufCPP <struct moisture_reading, HOUR_LOG_SIZE> moistureLog_24hr ;
-RingBufCPP <struct moisture_reading, DAY_LOG_SIZE> moistureLog_8day ;
+Planter planter(pins, PUMP_RESERVOIR_CAPACITY_MS, PUMP_PULSE_TIME_MS, MOISTURE_HI_VOLT, MOISTURE_LOW_VOLT) ;
+
 
 void setup() {
   Serial.begin(9600);
-  delay(500); 
+  delay(500);
 
   // Initialize cloud variables and properties
   initProperties();
   ArduinoCloud.begin(ArduinoIoTPreferredConnection);
   setDebugMessageLevel(2);
   ArduinoCloud.printDebugInfo();
-  
+
   // Set up the control logics
-  analogReference(AR_EXTERNAL) ;
-  pinMode(SENSOR_PIN, INPUT) ;
-  timerCounter = millis() ; 
-  pump.setup() ;
+  timerCounter = millis() ;
+  planter.setup() ;
   pumpSwitch = false ;
   planterStatus = String("EOM") ;
   moistureTrigger = INITIAL_MOISTURE_TRIGGER ;
@@ -67,133 +56,104 @@ void setup() {
 
 void loop() {
   ArduinoCloud.update();
-  
+
   // Run device logic every second
   if (timerCounter - millis() > timerDelay) {
     timerCounter = millis() ;
-     
-    checkMoistureTrigger() ;
-    updateMoistureReading() ;
-    checkPump() ;
 
+    checkPump() ;               // Check pump for timeout
+    readMoisture() ;            // Read moisture/update cloud
+    checkMoistureTrigger() ;    // Trigger pump if dry
   }
 }
 
 // ---------------------------------------
 // IoT Variable Triggered Routines
 // ---------------------------------------
-void onPlanterStatusChange() {
-  if (planterStatus == "check moisture")
-    planterStatus = "Moisture level is " + String((int)moistureSensor) + String("%")  ;
-  else if (planterStatus == "check pump") 
+void onPlanterCommandChange() {
+  
+  String command = planterCommand ;
+  command.toLowerCase() ; 
+  
+  if (command == "moisture")
+    planterStatus = "Moisture level is " + String((int)moistureSensor) + String("%\n")  ;
+
+  else if (command == "pump")
     planterStatus = "Pump status is " + String(pumpSwitch) ;
-  else if (planterStatus == "check status") {
-    
+
+  else if (command == "status") {
     String pumpRunStatus ;
-    if (pump.isTimeoutFlagSet())
+    if (planter.isTimeoutFlagSet())
       pumpRunStatus = "timeout" ;
-    else if (pump.getTimeSinceLastStopSec() < POST_TRIGGER_PAUSE_SEC)
-      pumpRunStatus = "paused" ;
+    else if (planter.getTimeSinceLastStopSec() < POST_TRIGGER_PAUSE_SEC)
+      pumpRunStatus += "paused" ;
     else
-      pumpRunStatus = "normal" ;
-      
-    planterStatus = 
+      pumpRunStatus += "normal" ;
+    planterStatus =
       String("Moisture status: \n") +
       String("- Level:\t") + String((int)moistureSensor) + String("% \n") +
       String("- Limit:\t") + String((int)moistureTrigger) + String("% \n") +
       String("Pump data: \n") +
-      String("- # cycles:\t") + String(pump.getRunCount()) + String("\n") +
-      String("- Runtime:\t") + String(pump.getRunTimeSec()) + String(" sec\n") +
+      String("- # cycles:\t") + String(planter.getRunCount()) + String("\n") +
+      String("- Runtime:\t") + String(planter.getRunTimeSec()) + String(" sec\n") +
       String("- Pump run status:\t") + pumpRunStatus + String(" \n") ;
   }
-  else if (planterStatus == "check history") {
-    struct moisture_reading *pMR ; 
 
-    planterStatus = 
-      String("Moisture history------- \n") ;
-      
-    planterStatus += String("Recent (hours ago): \n") ;
-    int n = moistureLog_24hr.numElements()-1 ;
-    int d = constrain (n-1, 0, n-8) ;
-    for (int i = n ; i>=d; i--)  // display only last 8 hours ;
-      if (pMR = moistureLog_24hr.peek(i))
-        planterStatus += String(n-i) + String(": ") + String(pMR->moisturePercent) + "% \n" ;
-        
-      
-    planterStatus += String("\nPrevious (days ago): \n") ;
-    n = moistureLog_8day.numElements()-1 ;
-    for (int i = n ; i>=0; i--)  
-      if (pMR = moistureLog_8day.peek(i))
-        planterStatus += String(n-i+1) + String(": ") + String(pMR->moisturePercent) + "% \n" ;
+  else if (command == "history") {
+    planterStatus = String("Moisture history------- \n") ;
+    planterStatus += planter.getRecentHistory() ;
+    planterStatus += planter.getDailyHistory() ;
   }
-  else 
-      planterStatus = "Unknown Command" ;
+
+  else if (planterStatus.startsWith("Unknown Command"))
+    planterStatus += " ";
+  else planterStatus = "Unknown Command\n" ;
 }
 
 
 void onPumpSwitchChange() {
-  
+
   // Toggle on
   if (pumpSwitch) {
-    if (pump.isTimeoutFlagSet()) {
+    if (planter.isTimeoutFlagSet()) {
       planterStatus = String("CMD: ") + String("Pump On... but pump timeout.") ;
       pumpSwitch = false ;
     }
     else {
-      pump.pumpOn() ;
+      planter.pumpOn() ;
       planterStatus = String("CMD: ") + String("Pump On") ;
     }
   }
-  
-  // Toggle off 
+
+  // Toggle off
   else {
-    pump.pumpOff() ;
+    planter.pumpOff() ;
     planterStatus = String("CMD: ") + String("Pump Off") ;
   }
 }
 
 void onMoistureTriggerChange() {
-    planterStatus = String("CMD: ") + String("Moisture Trigger updated to ") + String((int)moistureTrigger) + String("%") ;
+  planterStatus = String("CMD: ") + String("Moisture Trigger updated to ") + String((int)moistureTrigger) + String("%") ;
 }
 
 
 // ---------------------------------------
 // Timer-triggered loop routines
 // ---------------------------------------
-void updateMoistureReading() {
-  static unsigned long lastHourlyReading = 0 ;
-  static int numHourlyReadings = 0 ;
-  struct moisture_reading reading ;
-  
-  // Take the reading and update cloud 
-  reading.tstamp = millis() ;
-  int soil_reading = analogRead(SENSOR_PIN) ;
-  reading.moisturePercent = map(soil_reading, MOISTURE_LOW_VOLT, MOISTURE_HI_VOLT, 100, 0) ;
-  moistureSensor = reading.moisturePercent ;    // update cloud
-
-  // if it's been an hour since last reading, add to logs
-  if (reading.tstamp - lastHourlyReading > ONE_HOUR_MS) { 
-    moistureLog_24hr.add(reading, true) ; // add to circular log
-    lastHourlyReading = reading.tstamp ;
-
-    if (++numHourlyReadings >= 24) {
-      moistureLog_8day.add(reading, true) ;
-      numHourlyReadings = 0 ;
-    }
-  }
-  
+void readMoisture() {
+  moistureSensor = planter.readMoisture() ;
 }
 
 void checkMoistureTrigger() {
-  
-  if (! pump.isTimeoutFlagSet() &&
-      pump.getTimeSinceLastStopSec() > POST_TRIGGER_PAUSE_SEC  &&
+
+  if (! planter.isTimeoutFlagSet() &&
+      planter.getTimeSinceLastStopSec() > POST_TRIGGER_PAUSE_SEC  &&
       moistureSensor < moistureTrigger) {
-    pump.pumpPulse() ;
+    planter.pumpPulse() ;
     planterStatus = String("Msg: ") + String("Pump triggered by low moisture: ") + String((int)moistureSensor) + String("%")  ;
   }
 }
 
 void checkPump() {
-  pump.pumpCheck() ;
+  planter.pumpCheck() ;
 }

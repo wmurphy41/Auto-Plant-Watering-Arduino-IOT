@@ -6,7 +6,22 @@
 
 = Project: {Project}
 
-Describe your project
+To be done:
+1. Separate out command line and status       - TESTED
+2. Simplify commands:                         - TESTED
+  - status
+  - history
+3. Move history ringbuffer into pump class    - TESTED
+   - Change Pump class --> Platner class
+   - Add Moisture methods and properties
+4. Add more info to status:                   - NOT STARTED
+  - low moisture
+  - high moisture
+  - average moisture
+  - manual starts
+  - automatic starts
+  - total time pump ran
+5. Display formatted history                  - NOT STARTED
 
 == Step 1: Installation
 Please describe the steps to install this project.
