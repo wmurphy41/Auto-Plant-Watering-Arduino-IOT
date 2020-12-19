@@ -5,23 +5,7 @@
 :License: Public Domain
 
 = Project: {Project}
-
-To be done:
-1. Separate out command line and status       - TESTED
-2. Simplify commands:                         - TESTED
-  - status
-  - history
-3. Move history ringbuffer into pump class    - TESTED
-   - Change Pump class --> Platner class
-   - Add Moisture methods and properties
-4. Add more info to status:                   - NOT STARTED
-  - low moisture
-  - high moisture
-  - average moisture
-  - manual starts
-  - automatic starts
-  - total time pump ran
-5. Display formatted history                  - NOT STARTED
+Aduino MKR1000 based project for controlling a bump with one moisture sensor
 
 == Step 1: Installation
 Please describe the steps to install this project.
@@ -31,7 +15,7 @@ For example:
 1. Open this file
 2. Edit as you like
 3. Release to the World!
-
+F
 == Step 2: Assemble the circuit
 
 Assemble the circuit following the diagram layout.png attached to the sketch
@@ -42,14 +26,18 @@ Upload the code contained in this sketch on to your board
 
 === Folder structure
 
-....
- sketch123                => Arduino sketch folder
-  ├── sketch123.ino       => main Arduino file
-  ├── schematics.png      => (optional) an image of the required schematics
-  ├── layout.png          => (optional) an image of the layout
-  └── ReadMe.adoc         => this file
-....
+ Auto-Plant-Watering-Arduino-IOT               
+  └─── Code      
+        ├── IOT_WAM_Planter.ino => base project file
+        ├── Planter.cpp         => Planter Class
+        ├── Planter.hpp         => Planter Header
+        ├── thingProperties.h
+        ├── Secret
+        └── ReadMe.adoc         => this file
+  └─── Elecronics               => circuit design files      
+  └─── Mechanicals              => hardware deisgn files    
 
+....
 === License
 This project is released under a {License} License.
 

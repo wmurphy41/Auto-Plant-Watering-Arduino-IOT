@@ -9,6 +9,8 @@
   float moistureSensor;
   bool pumpSwitch;
 */
+#define MAXLEN_IOT_TEXT_BUFFER 206
+
 
 // Hardware constants
 #define PUMP_CONTROLLER_PIN 1
@@ -19,49 +21,50 @@
 
 // ********** CUSTOMIZATION VALUES *********
 #define INITIAL_MOISTURE_TRIGGER 50       // Set initial trigger v. high
-#define PUMP_RESERVOIR_CAPACITY_MS 90000  // Reservoir runs dry after 90 seconds
-#define PUMP_PULSE_TIME_MS 1500           // Pulse for 1.5 sec
-#define SENSOR_CYCLE_TIME_MS 1000         // Check sensors every second
 #define POST_TRIGGER_PAUSE_SEC 3000       // Pause 5 min after last pump stop 
 // before auto trigger (let moisture settle)
 
 // Global variables ;
 unsigned long timerDelay = SENSOR_CYCLE_TIME_MS ;
 unsigned long timerCounter = 0 ;
-struct Planter::pinConfig pins = {
-  PUMP_CONTROLLER_PIN ,
-  LED_PIN ,
-  SENSOR_PIN
-} ;
-Planter planter(pins, PUMP_RESERVOIR_CAPACITY_MS, PUMP_PULSE_TIME_MS, MOISTURE_HI_VOLT, MOISTURE_LOW_VOLT) ;
+struct Planter::pinConfig pins = { PUMP_CONTROLLER_PIN, LED_PIN, SENSOR_PIN } ;
+Planter planter(pins, MOISTURE_HI_VOLT, MOISTURE_LOW_VOLT) ;
+
+// Local functions
+void blink_delay(int reps=1, unsigned long int delay_ms = 500, int pin = LED_BUILTIN) ;
 
 
 void setup() {
-  Serial.begin(9600);
-  delay(500);
 
+
+  // Initialize cloud variables and properties
+  Serial.begin(9600);
+  Serial.println("------- setup starting ------------") ;
+  blink_delay(1) ;
+  
   // Initialize cloud variables and properties
   initProperties();
   ArduinoCloud.begin(ArduinoIoTPreferredConnection);
   setDebugMessageLevel(2);
   ArduinoCloud.printDebugInfo();
+  Serial.println("cloud configured...") ;
+  blink_delay(2) ;
 
-  // Set up the control logics
-  timerCounter = millis() ;
-  planter.setup() ;
+  // Set up the control logics  planter.setup() ;
   pumpSwitch = false ;
   planterStatus = String("EOM") ;
   moistureTrigger = INITIAL_MOISTURE_TRIGGER ;
+  planter.setup() ;
+  Serial.println("planter configured...") ;
+  Serial.println("------- setup complete ------------") ;
+  blink_delay(3) ;
 }
 
 void loop() {
   ArduinoCloud.update();
 
   // Run device logic every second
-  if (timerCounter - millis() > timerDelay) {
-    timerCounter = millis() ;
-
-    checkPump() ;               // Check pump for timeout
+  if (planter.checkStatus()) {
     readMoisture() ;            // Read moisture/update cloud
     checkMoistureTrigger() ;    // Trigger pump if dry
   }
@@ -76,10 +79,10 @@ void onPlanterCommandChange() {
   command.toLowerCase() ; 
   
   if (command == "moisture")
-    planterStatus = "Moisture level is " + String((int)moistureSensor) + String("%\n")  ;
+    planterCommand = "Moisture level is " + String((int)moistureSensor) + String("%\n")  ;
 
   else if (command == "pump")
-    planterStatus = "Pump status is " + String(pumpSwitch) ;
+    planterCommand = "Pump status is " + String(pumpSwitch) ;
 
   else if (command == "status") {
     String pumpRunStatus ;
@@ -89,7 +92,7 @@ void onPlanterCommandChange() {
       pumpRunStatus += "paused" ;
     else
       pumpRunStatus += "normal" ;
-    planterStatus =
+    planterCommand =
       String("Moisture status: \n") +
       String("- Level:\t") + String((int)moistureSensor) + String("% \n") +
       String("- Limit:\t") + String((int)moistureTrigger) + String("% \n") +
@@ -99,15 +102,49 @@ void onPlanterCommandChange() {
       String("- Pump run status:\t") + pumpRunStatus + String(" \n") ;
   }
 
+  else if (command == "reset") {
+    planter.reset() ;
+    planterCommand = String("Pump controls been reset.") ;
+  }
+  
   else if (command == "history") {
-    planterStatus = String("Moisture history------- \n") ;
-    planterStatus += planter.getRecentHistory() ;
-    planterStatus += planter.getDailyHistory() ;
+    planterCommand = String("Planter recent history:\n") ;
+    planterCommand += planter.getDailyHistory() ;
+    planterCommand = planterCommand.substring(0, MAXLEN_IOT_TEXT_BUFFER) ;
+  }
+  
+  else if (command.startsWith("set pulse")) {
+    unsigned long newPulseTime = command.substring(10).toInt() ;
+    if (planter.setPumpPulseTime_MS(newPulseTime*1000))
+      planterCommand = String("Pulse time set to ") + String(newPulseTime) ;
+    else 
+      planterCommand = String("Invalid pulse time") ;
+  }
+  
+  else if (command.startsWith("set reservoir")) {
+    unsigned long newReservoirTime = command.substring(14).toInt() ;
+    if (planter.setResevervoirCapacity_MS(newReservoirTime*1000))
+      planterCommand = String("Reservoir time set to ") + String(newReservoirTime) ;
+    else 
+      planterCommand = String("Invalid reservoir time") ;
   }
 
-  else if (planterStatus.startsWith("Unknown Command"))
-    planterStatus += " ";
-  else planterStatus = "Unknown Command\n" ;
+  else if (command == "get params") {
+    planterCommand = String("Parameters:--------\n") ;
+    planterCommand += planter.getParameters() ;
+  }
+
+  else if (command == "help") {
+    planterCommand = String("Available commands:\n") +
+                    String("moisture, \n") +
+                    String("pump \n") +
+                    String("reset \n") +
+                    String("status \n") +
+                    String("history \n") +
+                    String("set pulse X \n") +
+                    String("set reservoir X\n") ;
+  }
+  else planterCommand = "Unknown Command\n" ;
 }
 
 
@@ -141,7 +178,7 @@ void onMoistureTriggerChange() {
 // Timer-triggered loop routines
 // ---------------------------------------
 void readMoisture() {
-  moistureSensor = planter.readMoisture() ;
+  moistureSensor = planter.getMoisturePercent() ;
 }
 
 void checkMoistureTrigger() {
@@ -150,10 +187,19 @@ void checkMoistureTrigger() {
       planter.getTimeSinceLastStopSec() > POST_TRIGGER_PAUSE_SEC  &&
       moistureSensor < moistureTrigger) {
     planter.pumpPulse() ;
-    planterStatus = String("Msg: ") + String("Pump triggered by low moisture: ") + String((int)moistureSensor) + String("%")  ;
+    planterStatus = String("AUTO: ") + String("Pump triggered by low moisture: ") + String((int)moistureSensor) + String("%")  ;
   }
 }
 
-void checkPump() {
-  planter.pumpCheck() ;
+// ---------------------------------------
+// Blink routine
+// ---------------------------------------
+void blink_delay(int reps /* = 1*/, unsigned long int delay_ms /*= 500*/, int pin /*= LED_BUILTIN*/) {
+    
+    for (int i=1; i<=reps; i++) {
+      digitalWrite(pin, HIGH);   // turn the LED on (HIGH is the voltage level)
+      delay(delay_ms);                       // wait for a second
+      digitalWrite(pin, LOW);    // turn the LED off by making the voltage LOW
+      delay(delay_ms);                       // wait for a second
+    }
 }

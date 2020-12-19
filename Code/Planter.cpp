@@ -1,107 +1,201 @@
 #include "Planter.hpp"
 #include <Arduino.h>
+#include <limits.h>
 
 // ---------------------------------------
 // Planter Class
 // ---------------------------------------
-Planter::Planter(struct pinConfig p, unsigned long r_c_ms, unsigned long p_time_ms, int dv, int sv ) {
+Planter::Planter(struct pinConfig p, int dv, int sv ) {
 
   // Initialize input parameters
   pins = p ;
-  reservoir_capacity_ms = r_c_ms ;
-  pulse_time_ms = p_time_ms ;
   sensor_dry_volt = dv ;
   sensor_sat_volt = sv ;
+  
+  reservoir_capacity_ms = PUMP_RESERVOIR_CAPACITY_MS ;
+  pulse_time_ms = PUMP_PULSE_TIME_MS ;
+  sensor_cycle_time_ms = SENSOR_CYCLE_TIME_MS ;
 
-  // Other properties are set during pump::Setup
+
+  // Other properties are initialized during pump::Setup
 }
 void Planter::setup() {
 
+
   pinMode(pins.pump, OUTPUT) ;
   pinMode(pins.led, OUTPUT) ;
-  digitalWrite(pins.pump,0) ;
-  digitalWrite(pins.led,0) ;
+  digitalWrite(pins.pump,LOW) ;
+  digitalWrite(pins.led,LOW) ;
+
   analogReference(AR_EXTERNAL) ;
   pinMode(pins.sensor, INPUT) ;
 
-  pump_start_ms = pump_stop_ms = elapsed_start_time_ms = millis() ;
-  run_count = 0 ;
-  run_time_ms = 0 ;
-  pump_on = timeout_triggered = false ;
+  unsigned long now = millis() ;
+  last_check_time_ms = pump_start_ms = pump_stop_ms = now ;
+  total_run_count = 0 ;
+  total_run_time_ms = 0 ;
+  timeout_triggered = false ;
   
+  moistureLog_Day0.tstamp_begin = moistureLog_Day0.tstamp_end = now ;
+  moistureLog_Day0.lowMoisture = INT_MAX ;
+  readMoisture(true) ;
+
 }
 
+// This is the regular check that should be called every loop cycle
+// - Once a second (or as configured) check and log moisture
+// - Check that the pump doesn't need to turn off
+// - Check if hourly log needs to be updated.
+// Returns yes, if there is any status change to note.
+bool Planter::checkStatus() {
+  bool statusMoisture, statusPump = false ;
+  unsigned long now = millis() ;
+
+  // check and log moisture
+  if (now - last_check_time_ms > sensor_cycle_time_ms) {
+    last_check_time_ms = now ;
+    readMoisture(true) ; 
+    statusMoisture = true ;
+  }
+
+  statusPump = checkPump() ;
+  
+  // if it's been an hour... update the hourly log.
+  if (moistureLog_Day0.tstamp_end - moistureLog_Day0.tstamp_begin > ONE_DAY_MS) {
+    moistureLog_Daily.add(moistureLog_Day0, true) ; // add to circular log
+
+    // reset this-hour log
+    moistureLog_Day0 = planterStatus() ; 
+    moistureLog_Day0.tstamp_begin = moistureLog_Day0.tstamp_end = now ;
+    moistureLog_Day0.lowMoisture = INT_MAX ;
+    readMoisture(true) ;
+  }
+
+  
+  return (statusMoisture || statusPump) ;
+}
+
+bool Planter::isPumpOn() {
+  
+  return (digitalRead(pins.pump) == HIGH) ;
+  
+}
 bool Planter::isTimeoutFlagSet() {
    return timeout_triggered ;
 }
 
-unsigned long Planter::getElapsedTimeSec() {
-  return ((millis() - elapsed_start_time_ms)/1000) ;
-}
-
 unsigned long Planter::getRunTimeSec() {
-  return (run_time_ms / 1000) ;
+  return (total_run_time_ms / 1000) ;
 }
 
 unsigned int Planter::getRunCount() {
-   return run_count ;
-}
-bool Planter::isPumpRunning() {  // Returns true if pump is currently running
-    return pump_on ;
+   return total_run_count ;
 }
 unsigned long Planter::getTimeSinceLastStopSec() {
   return (millis() - pump_stop_ms)/1000 ;
 }
 
-String Planter::getRecentHistory() {
-  String status = String("Recent (hours ago): \n") ;
-  
-  int n = moistureLog_24hr.numElements() - 1 ;
-  int d = constrain (n - 1, 0, n - 8) ;
-  for (int i = n ; i >= d; i--)   {                   // display only last 8 hours ;
-    struct moisture_reading *pMR ; 
-    if (pMR = moistureLog_24hr.peek(i))
-      status += String(n - i) + String(": ") + String(pMR->moisturePercent) + "% \n" ;
-  }
-  
-  return status ;
+int Planter::getMoisturePercent() {
+  return moistureLog_Day0.moisturePercent ;
 }
 
+bool Planter::setResevervoirCapacity_MS(unsigned long rc_ms) {
+  reservoir_capacity_ms = rc_ms ;
+  bool success = false ;
+  if (rc_ms>=MIN_PULSE_TIME_MS && rc_ms<=MAX_RESERVOIR_TIME_MS) {
+    reservoir_capacity_ms = rc_ms ;
+    success = true ;
+  }
+  return success ;
+}
+
+bool Planter::setPumpPulseTime_MS(unsigned long ppt_ms) {
+  bool success = false ;
+  if (ppt_ms>=MIN_PULSE_TIME_MS && ppt_ms<=MAX_PULSE_TIME_MS) {
+    pulse_time_ms = ppt_ms ;
+    success = true ;
+  }
+  return success ;
+}
+
+String Planter:: getParameters() {
+  
+  String status ;
+  
+  status += "Reservoir Capacity:\t" ;
+  status += reservoir_capacity_ms/1000 ;
+  status += " sec\n" ;
+
+  status += "Pump Pulse Time:\t" ;
+  status += pulse_time_ms/1000 ;
+  status += " sec\n" ;
+  
+  return status ;
+  
+}
+
+// Returns text string of current hour + most recent hours.
 String Planter::getDailyHistory() {
-  String status = String("\nPrevious (days ago): \n") ;
-  
-  int n = moistureLog_8day.numElements() - 1 ;
-  for (int i = n ; i >= 0; i--) {
-    struct moisture_reading *pMR ; 
-    if (pMR = moistureLog_8day.peek(i))
-      status += String(n - i + 1) + String(": ") + String(pMR->moisturePercent) + "% \n" ;
+  // Header
+  String status = 
+      String("Day\tlast\tavg\tMin\tMax\tR_#\tR_tm\n") +
+      String("-----\t-----\t-----\t-----\t-----\t-----\t----- \n") ;
+      
+  // header  
+  status += 
+    String("0 \t") +
+    String(moistureLog_Day0.moisturePercent) + "\t" +
+    String((int)moistureLog_Day0.avgMoisture) + "\t" +
+    String(moistureLog_Day0.lowMoisture) + "\t" +
+    String(moistureLog_Day0.highMoisture) + "\t" +
+    String(moistureLog_Day0.pumpStarts) + "\t" +
+    String((int)moistureLog_Day0.pumpRunTime_ms/1000) + "\n" ;
+
+  // Current Day
+  int newest_i = moistureLog_Daily.numElements() - 1 ;      // Index of most recent entry
+  int oldest_i = max ( 0, newest_i - (DAY_LOG_SIZE-1) )  ;
+  for (int i=0 ; i <= (newest_i-oldest_i) ; i++)   {        
+    
+    struct planterStatus *pMR ; 
+    if (pMR = moistureLog_Daily.peek(newest_i - i))
+      status += 
+        String(i+1) + "\t" +
+        String(pMR->moisturePercent) + "\t" +
+        String((int)pMR->avgMoisture) + "\t" +
+        String(pMR->lowMoisture) + "\t" +
+        String(pMR->highMoisture) + "\t" +
+        String(pMR->pumpStarts) + "\t" +
+        String((int)pMR->pumpRunTime_ms/1000) + "\n" ;
   }
   
   return status ;
 }
-
 
 // Turn on pump
 void Planter::pumpOn() {
-  if (! pump_on && ! timeout_triggered) {    // No pump, if it's already on or in timeout
-    digitalWrite(pins.pump, 1) ;
-    digitalWrite(pins.led,1) ;
-    pump_on = true ;
-    run_count++ ;
+  
+  if (! isPumpOn() && ! timeout_triggered) {    // No pump, if it's already on or in timeout
+    digitalWrite(pins.pump, HIGH) ;
+    digitalWrite(pins.led,HIGH) ;
     pump_start_ms = millis() ;             // reset the start counter
   }
 }
 
-// Turn off pump
+// Turn off pump (whether it was on or not)
+// If it had been on, log pump run time
 void Planter::pumpOff() {
-  // Whether pump running flag is on or not, force pump stop
-  digitalWrite(pins.pump,0) ;
-  digitalWrite(pins.led,0) ;
-  if (pump_on) {
+  
+  bool wasPumpOn = isPumpOn() ;
+  digitalWrite(pins.pump,LOW) ;
+  digitalWrite(pins.led,LOW) ;
+
+  if (wasPumpOn) {
     pump_stop_ms = millis() ;     // log when pump was stopped
-    run_time_ms += (pump_stop_ms - pump_start_ms) ;
-    timeout_triggered = (run_time_ms >= reservoir_capacity_ms) ;
-    pump_on = false ;
+    unsigned long pump_runtime_ms = pump_stop_ms - pump_start_ms ;
+    total_run_count++ ;
+    moistureLog_Day0.pumpStarts++ ;
+    moistureLog_Day0.pumpRunTime_ms += pump_runtime_ms ;
+    total_run_time_ms += pump_runtime_ms ;
   }
 }
 
@@ -118,50 +212,52 @@ void Planter::pumpPulse(unsigned long override_pulse_ms)  {
   }
 }
 
-// if total time running is longer than the time it takes to empty the resevoir, then 
+// if total time running is longer than the time it takes to empty the reservoir, then 
 // shut off the pump and set the timeout flag.
-bool Planter::pumpCheck() {
+bool Planter::checkPump() {
 
-  if (pump_on && ! timeout_triggered )
-    if ((millis() - pump_start_ms + run_time_ms) >= reservoir_capacity_ms)
+  if ( isPumpOn() )
+    if (((millis() - pump_start_ms) + total_run_time_ms) >= reservoir_capacity_ms) {
       pumpOff() ;
-          
+      timeout_triggered = true ;
+    }
   return timeout_triggered ;
 }
 
 // Reset pump after refill 
 void Planter::reset() {        
-  // reset statistics and clear timeout flag
+  // reset statistics, clear timeout flag
   pumpOff() ;
-  pump_start_ms = pump_stop_ms = elapsed_start_time_ms = millis() ;
-  run_count = 0 ;
-  run_time_ms = 0 ;
-  pump_on = timeout_triggered = false ;
+  total_run_count = 0 ;
+  total_run_time_ms = 0 ;
+  timeout_triggered = false ;
 }
 
 // Read moisture from sensor
-int Planter::readMoisture() {
+int Planter::readMoisture(bool log_result) {
   
-  static unsigned long lastHourlyReading = 0 ;
-  static int numHourlyReadings = 0 ;
-  struct moisture_reading reading ;
-
-  // Take the reading
-  
-  reading.tstamp = millis() ;
+  // Take the reading and convert to moisture percent
   int soil_reading = analogRead(pins.sensor) ;
-  reading.moisturePercent = map(soil_reading, sensor_dry_volt, sensor_sat_volt, 0, 100) ;
+  int moisture_percent = map(soil_reading, sensor_dry_volt, sensor_sat_volt, 0, 100) ;
 
-  // if it's been an hour since last reading, add to logs
-  if (reading.tstamp - lastHourlyReading > ONE_HOUR_MS) {
-    moistureLog_24hr.add(reading, true) ; // add to circular log
-    lastHourlyReading = reading.tstamp ;
-
-    if (++numHourlyReadings >= 24) {
-      moistureLog_8day.add(reading, true) ;
-      numHourlyReadings = 0 ;
-    }
-  }
+  // Record data in the current log
+  if (log_result) {
+    unsigned long now = millis() ;
   
-  return reading.moisturePercent ;
+    // Log time stamps
+    moistureLog_Day0.tstamp_end = now ;
+    moistureLog_Day0.numReadings++ ;
+
+    // Log moisture reading, calculate average, update min/max
+    moistureLog_Day0.moisturePercent = moisture_percent ;
+    moistureLog_Day0.avgMoisture = 
+            (moistureLog_Day0.avgMoisture*(moistureLog_Day0.numReadings-1) + 
+             moistureLog_Day0.moisturePercent) /
+            moistureLog_Day0.numReadings ;
+    moistureLog_Day0.lowMoisture = min(moistureLog_Day0.lowMoisture, moistureLog_Day0.moisturePercent) ;
+    moistureLog_Day0.highMoisture = max(moistureLog_Day0.highMoisture, moistureLog_Day0.moisturePercent) ;
+  }
+
+  return moisture_percent ;
 }
+
