@@ -27,7 +27,8 @@ void Planter::setup() {
   digitalWrite(pins.pump,LOW) ;
   digitalWrite(pins.led,LOW) ;
 
-  analogReference(AR_EXTERNAL) ;
+  // analogReference(DEFAULT) ;
+  analogReadResolution(ANALOG_RESOLUTION) ;
   pinMode(pins.sensor, INPUT) ;
 
   unsigned long now = millis() ;
@@ -38,7 +39,7 @@ void Planter::setup() {
   
   moistureLog_Day0.tstamp_begin = moistureLog_Day0.tstamp_end = now ;
   moistureLog_Day0.lowMoisture = INT_MAX ;
-  readMoisture(true) ;
+  getMoisturePercent(true) ;
 
 }
 
@@ -48,17 +49,17 @@ void Planter::setup() {
 // - Check if hourly log needs to be updated.
 // Returns yes, if there is any status change to note.
 bool Planter::checkStatus() {
-  bool statusMoisture, statusPump = false ;
+  bool statusMoisture = false ;
   unsigned long now = millis() ;
 
   // check and log moisture
   if (now - last_check_time_ms > sensor_cycle_time_ms) {
     last_check_time_ms = now ;
-    readMoisture(true) ; 
+    getMoisturePercent(true) ; 
     statusMoisture = true ;
   }
 
-  statusPump = checkPump() ;
+  bool statusPump = checkPump() ;
   
   // if it's been an hour... update the hourly log.
   if (moistureLog_Day0.tstamp_end - moistureLog_Day0.tstamp_begin > ONE_DAY_MS) {
@@ -68,7 +69,7 @@ bool Planter::checkStatus() {
     moistureLog_Day0 = planterStatus() ; 
     moistureLog_Day0.tstamp_begin = moistureLog_Day0.tstamp_end = now ;
     moistureLog_Day0.lowMoisture = INT_MAX ;
-    readMoisture(true) ;
+    getMoisturePercent(true) ;
   }
 
   
@@ -95,12 +96,7 @@ unsigned long Planter::getTimeSinceLastStopSec() {
   return (millis() - pump_stop_ms)/1000 ;
 }
 
-int Planter::getMoisturePercent() {
-  return moistureLog_Day0.moisturePercent ;
-}
-
 bool Planter::setResevervoirCapacity_MS(unsigned long rc_ms) {
-  reservoir_capacity_ms = rc_ms ;
   bool success = false ;
   if (rc_ms>=MIN_PULSE_TIME_MS && rc_ms<=MAX_RESERVOIR_TIME_MS) {
     reservoir_capacity_ms = rc_ms ;
@@ -118,21 +114,31 @@ bool Planter::setPumpPulseTime_MS(unsigned long ppt_ms) {
   return success ;
 }
 
-String Planter:: getParameters() {
-  
-  String status ;
-  
-  status += "Reservoir Capacity:\t" ;
-  status += reservoir_capacity_ms/1000 ;
-  status += " sec\n" ;
-
-  status += "Pump Pulse Time:\t" ;
-  status += pulse_time_ms/1000 ;
-  status += " sec\n" ;
-  
-  return status ;
-  
+bool Planter::setSensorDryVolt(int sdv) {
+  bool success = false ;
+  if (sdv >= 0 && sdv <=ANALOG_MAX_OUT) {
+    sensor_dry_volt = sdv ;
+    success = true ;
+  }
+  return success ;
 }
+
+bool Planter::setSensorSatVolt(int ssv) {
+  bool success = false ;
+  if (ssv >= 0 && ssv <=ANALOG_MAX_OUT) {
+    sensor_sat_volt = ssv ;
+    success = true ;
+  }
+  return success ;
+}
+
+unsigned long Planter::getResevervoirCapacity_MS() { return reservoir_capacity_ms ; }
+
+unsigned long  Planter::getPumpPulseTime_MS() { return pulse_time_ms ; }
+
+int Planter::getSensorDryVolt() { return sensor_dry_volt ; }
+
+int Planter::getSensorSatVolt() { return sensor_sat_volt ; }
 
 // Returns text string of current hour + most recent hours.
 String Planter::getDailyHistory() {
@@ -215,13 +221,16 @@ void Planter::pumpPulse(unsigned long override_pulse_ms)  {
 // if total time running is longer than the time it takes to empty the reservoir, then 
 // shut off the pump and set the timeout flag.
 bool Planter::checkPump() {
+  
+  bool status_changed = false ;
 
   if ( isPumpOn() )
     if (((millis() - pump_start_ms) + total_run_time_ms) >= reservoir_capacity_ms) {
       pumpOff() ;
       timeout_triggered = true ;
+      status_changed = true ;
     }
-  return timeout_triggered ;
+  return status_changed ;
 }
 
 // Reset pump after refill 
@@ -233,11 +242,16 @@ void Planter::reset() {
   timeout_triggered = false ;
 }
 
-// Read moisture from sensor
-int Planter::readMoisture(bool log_result) {
+// Read moisture from sensor and returns raw value
+int Planter::getMoistureLevel() {
+  return analogRead(pins.sensor) ;
+}
+
+// Read moisture from sensor, converts to percent, and logs
+int Planter::getMoisturePercent(bool log_result) {
   
   // Take the reading and convert to moisture percent
-  int soil_reading = analogRead(pins.sensor) ;
+  int soil_reading = getMoistureLevel() ;
   int moisture_percent = map(soil_reading, sensor_dry_volt, sensor_sat_volt, 0, 100) ;
 
   // Record data in the current log

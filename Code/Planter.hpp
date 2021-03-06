@@ -5,7 +5,7 @@
 
 // Time constants
 #define ONE_DAY_MS 86400000               // 1 day = 86,400,000 miliseconds
-// #define ONE_DAY_MS 10000                  // 1 day = 10 seconds = 10,0000 ms <== for testing
+// #define ONE_DAY_MS 10000               // 1 day = 10 seconds = 10,0000 ms <== for testing
 #define DAY_LOG_SIZE 8                    // Track 6 days of data (max buffer will hold)
 
 // Parameter defaults
@@ -17,6 +17,9 @@
 #define MIN_PULSE_TIME_MS 500             // Min pump pulse time is .5 seconds
 #define MAX_RESERVOIR_TIME_MS 300000      // Max reservoir capacity 5 minutes 
 
+#define ANALOG_RESOLUTION 12              // Read resolution of analog pin in bits
+#define ANALOG_MAX_OUT 4096               // Corresponding max value
+
 
 
 class Planter {
@@ -27,10 +30,10 @@ class Planter {
   // Parameters set during construction
   struct pinConfig pins ;
   unsigned long  reservoir_capacity_ms ;
+  unsigned long sensor_cycle_time_ms ;
   unsigned long  pulse_time_ms ;
   int sensor_dry_volt ;
   int sensor_sat_volt ;
-  int sensor_cycle_time_ms ;
   
   // State tracking properties
   bool timeout_triggered ; 
@@ -64,14 +67,18 @@ class Planter {
   unsigned long getElapsedTimeSec() ;
   unsigned long getRunTimeSec() ;
   unsigned int getRunCount() ;
-  int getMoisturePercent() ;
   bool isPumpOn() ;
   bool isTimeoutFlagSet() ;
   
   bool setResevervoirCapacity_MS(unsigned long) ;
   bool setPumpPulseTime_MS(unsigned long) ;
+  bool setSensorDryVolt(int) ;
+  bool setSensorSatVolt(int) ;
+  unsigned long getResevervoirCapacity_MS() ;
+  unsigned long  getPumpPulseTime_MS() ;
+  int getSensorDryVolt() ;
+  int getSensorSatVolt() ;
  
-  String getParameters() ;
   String getDailyHistory() ;
 
   void setup() ;                                          // Initialze pump during setup() ;
@@ -81,7 +88,8 @@ class Planter {
   void pumpOff() ;                                        // Turn off pump
   bool checkPump() ;                                      // Should be run in each loop. Checks for timeout
   void pumpPulse(unsigned long override_pulse_ms = 0) ;   // Pulse pump on/off
-  int readMoisture(bool log_result=false) ;               // Read moisture from sensor
+  int getMoistureLevel() ;                                // Reads raw soil moisture level
+  int getMoisturePercent(bool log_result=false) ;        // Read moisture from sensor. Return percent
 } ;
 
 
