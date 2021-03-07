@@ -210,6 +210,9 @@ void Planter::pumpPulse(unsigned long override_pulse_ms)  {
   unsigned long p ;
   if (override_pulse_ms == 0) p = pulse_time_ms ;
   else p = override_pulse_ms ;
+    
+  if ((p  + total_run_time_ms) >= reservoir_capacity_ms) 
+    timeout_triggered = true ;
 
   if (! timeout_triggered) {
     pumpOn() ;
