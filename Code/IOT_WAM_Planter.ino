@@ -15,7 +15,6 @@
 
 // ********** CUSTOMIZATION VALUES *********
 #define INITIAL_MOISTURE_TRIGGER 50       // Set initial trigger v. high
-#define POST_TRIGGER_PAUSE_SEC 3000       // Pause 5 min after last pump stop 
 #define POST_TRIGGER_PAUSE_SEC 300        // Pause 5 min after last pump stop 
 // before auto trigger (let moisture settle)
 
