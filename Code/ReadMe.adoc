@@ -1,11 +1,12 @@
 :Author: wmurphy41
 :Email:
-:Date: 17/09/2020
+:Date: 28/02/2021
 :Revision: version#
 :License: Public Domain
 
 = Project: {Project}
-Aduino MKR1000 based project for controlling a bump with one moisture sensor
+
+Describe your project
 
 == Step 1: Installation
 Please describe the steps to install this project.
@@ -15,7 +16,7 @@ For example:
 1. Open this file
 2. Edit as you like
 3. Release to the World!
-F
+
 == Step 2: Assemble the circuit
 
 Assemble the circuit following the diagram layout.png attached to the sketch
@@ -26,18 +27,14 @@ Upload the code contained in this sketch on to your board
 
 === Folder structure
 
- Auto-Plant-Watering-Arduino-IOT               
-  └─── Code      
-        ├── IOT_WAM_Planter.ino => base project file
-        ├── Planter.cpp         => Planter Class
-        ├── Planter.hpp         => Planter Header
-        ├── thingProperties.h
-        ├── Secret
-        └── ReadMe.adoc         => this file
-  └─── Elecronics               => circuit design files      
-  └─── Mechanicals              => hardware deisgn files    
-
 ....
+ sketch123                => Arduino sketch folder
+  ├── sketch123.ino       => main Arduino file
+  ├── schematics.png      => (optional) an image of the required schematics
+  ├── layout.png          => (optional) an image of the layout
+  └── ReadMe.adoc         => this file
+....
+
 === License
 This project is released under a {License} License.
 

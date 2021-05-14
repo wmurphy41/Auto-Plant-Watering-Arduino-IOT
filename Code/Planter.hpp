@@ -8,14 +8,6 @@
 // #define ONE_DAY_MS 10000               // 1 day = 10 seconds = 10,0000 ms <== for testing
 #define DAY_LOG_SIZE 8                    // Track 6 days of data (max buffer will hold)
 
-// Parameter defaults
-#define PUMP_RESERVOIR_CAPACITY_MS 90000  // Reservoir runs dry after 90 seconds (initial setting)
-#define PUMP_PULSE_TIME_MS 1500           // Pulse for 1.5 sec
-#define SENSOR_CYCLE_TIME_MS 1000         // Check sensors every second
-
-#define MAX_PULSE_TIME_MS 5000            // Max pump pulse time is 5 seconds
-#define MIN_PULSE_TIME_MS 500             // Min pump pulse time is .5 seconds
-#define MAX_RESERVOIR_TIME_MS 300000      // Max reservoir capacity 5 minutes 
 
 #define ANALOG_RESOLUTION 12              // Read resolution of analog pin in bits
 #define ANALOG_MAX_OUT 4096               // Corresponding max value

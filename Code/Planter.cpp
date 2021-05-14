@@ -1,4 +1,5 @@
 #include "Planter.hpp"
+#include "hardware.h"
 #include <Arduino.h>
 #include <limits.h>
 

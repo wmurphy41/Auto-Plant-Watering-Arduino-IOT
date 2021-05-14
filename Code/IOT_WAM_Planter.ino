@@ -16,15 +16,18 @@
 // ********** CUSTOMIZATION VALUES *********
 #define INITIAL_MOISTURE_TRIGGER 50       // Set initial trigger v. high
 #define POST_TRIGGER_PAUSE_SEC 3000       // Pause 5 min after last pump stop 
+#define POST_TRIGGER_PAUSE_SEC 300        // Pause 5 min after last pump stop 
 // before auto trigger (let moisture settle)
 
 // Global variables ;
 unsigned long timerDelay = SENSOR_CYCLE_TIME_MS ;
+unsigned long pumpPauseTimeSec = POST_TRIGGER_PAUSE_SEC ;
 unsigned long timerCounter = 0 ;
 struct Planter::pinConfig pins = { PUMP_CONTROLLER_PIN, LED_PIN, SENSOR_PIN } ;
 Planter planter(pins, MOISTURE_HI_VOLT, MOISTURE_LOW_VOLT) ;
 
 // Local functions
+void blink_toggle(int pin = LED_BUILTIN) ;
 void blink_delay(int reps=1, unsigned long int delay_ms = 500, int pin = LED_BUILTIN) ;
 
 
@@ -42,7 +45,7 @@ void setup() {
   setDebugMessageLevel(2);
   ArduinoCloud.printDebugInfo();
   Serial.println("cloud configured...") ;
-  blink_delay(2) ;
+  blink_delay(1) ;
 
   // Set up the control logics  planter.setup() ;
   pumpSwitch = false ;
@@ -51,7 +54,7 @@ void setup() {
   planter.setup() ;
   Serial.println("planter configured...") ;
   Serial.println("------- setup complete ------------") ;
-  blink_delay(3) ;
+  blink_delay(1) ;
 }
 
 void loop() {
@@ -59,6 +62,7 @@ void loop() {
 
   // Run device logic every second
   if (planter.checkStatus()) {
+    blink_toggle() ;
     readMoisture() ;            // Read moisture/update cloud
     checkMoistureTrigger() ;    // Trigger pump if dry
   }
@@ -82,7 +86,7 @@ void onPlanterCommandChange() {
     String pumpRunStatus ;
     if (planter.isTimeoutFlagSet())
       pumpRunStatus = "timeout" ;
-    else if (planter.getTimeSinceLastStopSec() < POST_TRIGGER_PAUSE_SEC)
+    else if (planter.getTimeSinceLastStopSec() < pumpPauseTimeSec)
       pumpRunStatus += "paused" ;
     else
       pumpRunStatus += "normal" ;
@@ -143,9 +147,10 @@ void onPlanterCommandChange() {
       planterStatus = String("Invalid reservoir time") ;
   }
 
-  else if (command == "get params") {
-    planterStatus = String("Parameters:--------\n") ;
-    planterStatus += planter.getParameters() ;
+  else if (command.startsWith("set pause")) {
+    unsigned long new_pause_sec = command.substring(9).toInt() ;
+    pumpPauseTimeSec = new_pause_sec ;
+    String("Pump post-run pause time set to ") + String(pumpPauseTimeSec) ;
   }
 
   else if (command == "help") {
@@ -157,8 +162,9 @@ void onPlanterCommandChange() {
                     String("history \n") +
                     String("set pulse X \n") +
                     String("set reservoir X\n") +
-                    String("set sensor sat volt X\n") 
-                    String("set sensor dry volt X\n") ;
+                    String("set sensor sat volt X\n") +
+                    String("set sensor dry volt X\n") +
+                    String("set pause X\n") ;
   }
   else planterStatus = "Unknown Command\n" ;
 }
@@ -201,7 +207,7 @@ void readMoisture() {
 void checkMoistureTrigger() {
 
   if (! planter.isTimeoutFlagSet() &&
-      planter.getTimeSinceLastStopSec() > POST_TRIGGER_PAUSE_SEC  &&
+      planter.getTimeSinceLastStopSec() > pumpPauseTimeSec  &&
       moisturePercent < moistureTrigger) {
     planter.pumpPulse() ;
     planterStatus = String("AUTO: ") + String("Pump triggered by low moisture: ") + String((int)moisturePercent) + String("%")  ;
@@ -209,14 +215,21 @@ void checkMoistureTrigger() {
 }
 
 // ---------------------------------------
-// Blink routine
+// Blink routines
 // ---------------------------------------
+void blink_toggle(int pin /*= LED_BUILTIN*/) {
+    
+   digitalWrite(pin, !digitalRead(pin));
+}
+
 void blink_delay(int reps /* = 1*/, unsigned long int delay_ms /*= 500*/, int pin /*= LED_BUILTIN*/) {
     
     for (int i=1; i<=reps; i++) {
       digitalWrite(pin, HIGH);   // turn the LED on (HIGH is the voltage level)
       delay(delay_ms);                       // wait for a second
       digitalWrite(pin, LOW);    // turn the LED off by making the voltage LOW
-      delay(delay_ms);                       // wait for a second
+      delay(delay_ms); 
+      
+      // wait for a second
     }
 }

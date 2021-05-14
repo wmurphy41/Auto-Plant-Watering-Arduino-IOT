@@ -16,9 +16,9 @@ void onPlanterCommandChange();
 int moistureLevel;
 CloudPercentage moistureTrigger;
 String planterStatus;
-CloudPercentage moisturePercent;
 CloudSwitch pumpSwitch;
 String planterCommand;
+CloudPercentage moisturePercent;
 
 void initProperties(){
 
@@ -26,9 +26,9 @@ void initProperties(){
   ArduinoCloud.addProperty(moistureLevel, READ, ON_CHANGE, NULL);
   ArduinoCloud.addProperty(moistureTrigger, READWRITE, ON_CHANGE, onMoistureTriggerChange);
   ArduinoCloud.addProperty(planterStatus, READ, ON_CHANGE, NULL);
-  ArduinoCloud.addProperty(moisturePercent, READ, ON_CHANGE, NULL);
   ArduinoCloud.addProperty(pumpSwitch, READWRITE, ON_CHANGE, onPumpSwitchChange);
   ArduinoCloud.addProperty(planterCommand, READWRITE, ON_CHANGE, onPlanterCommandChange);
+  ArduinoCloud.addProperty(moisturePercent, READ, ON_CHANGE, NULL);
 
 }
 
